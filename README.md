@@ -1,4 +1,4 @@
-# 🌟 Image Super-Resolution Project
+# 🌟 Image Super-Resolution 
 
 ---
 
