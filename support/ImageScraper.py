@@ -1,53 +1,105 @@
 import requests
 import os
 from dotenv import load_dotenv
+import time
 
+def download_pexels_images(
+    query: str,
+    total_images: int,
+    per_page: int = 20,
+    save_dir: str = "data/highRes",
+    api_key_env: str = "PEXELS_API_KEY",
+    max_retries: int = 3,
+    delay_between_requests: float = 1.0,
+):
+    """
+    Download images from Pexels based on a search query.
 
-load_dotenv()
-API_KEY = os.getenv("PEXELS_API_KEY")
+    Args:
+        query (str): Search keyword for images.
+        total_images (int): Total number of unique images to download.
+        per_page (int): Number of images per API request page (max 80).
+        save_dir (str): Directory to save downloaded images.
+        api_key_env (str): Environment variable name storing the Pexels API key.
+        max_retries (int): Number of retries for failed API requests.
+        delay_between_requests (float): Delay between API requests in seconds to avoid rate limits.
 
-URL = "https://api.pexels.com/v1/search"
-QUERY = "tree"
-PER_PAGE = 20  
-TOTAL_IMAGES = 100
+    Returns:
+        int: Number of images downloaded successfully.
+    """
+    load_dotenv()
+    API_KEY = os.getenv(api_key_env)
+    if not API_KEY:
+        raise ValueError(f"API key not found in environment variable '{api_key_env}'")
 
-headers = {"Authorization": API_KEY}
+    os.makedirs(save_dir, exist_ok=True)
 
+    URL = "https://api.pexels.com/v1/search"
+    headers = {"Authorization": API_KEY}
 
-os.makedirs("data/highRes", exist_ok=True)
+    image_counter = 0
+    page = 1
+    downloaded_urls = set()
 
-image_counter = 0
-page = 1  
-downloaded_urls = set()  
+    while image_counter < total_images:
+        params = {"query": query, "per_page": per_page, "page": page}
+        for attempt in range(max_retries):
+            try:
+                response = requests.get(URL, headers=headers, params=params, timeout=10)
+                if response.status_code == 200:
+                    break  # Success
+                else:
+                    print(f"Error fetching images (Status {response.status_code}): {response.text}")
+                    time.sleep(delay_between_requests)
+            except requests.RequestException as e:
+                print(f"Request failed: {e}. Retrying ({attempt + 1}/{max_retries})...")
+                time.sleep(delay_between_requests)
+        else:
+            print("Max retries reached. Stopping download.")
+            break
 
-while image_counter < TOTAL_IMAGES:
-    params = {"query": QUERY, "per_page": PER_PAGE, "page": page}
-    res = requests.get(URL, headers=headers, params=params)
+        data = response.json()
+        photos = data.get("photos", [])
+        if not photos:
+            print("No more photos found. Ending download.")
+            break
 
-    if res.status_code == 200:
-        data = res.json()
-        for photo in data.get("photos", []):
-            image_url = photo["src"]["original"]
-
-          
+        for photo in photos:
+            image_url = photo.get("src", {}).get("original")
+            if not image_url:
+                continue
             if image_url in downloaded_urls:
                 continue
-            
-            downloaded_urls.add(image_url)
 
-            image_data = requests.get(image_url).content
-            filename = f"data/highRes/HR{image_counter + 1:03d}.jpg"
+            try:
+                image_response = requests.get(image_url, timeout=15)
+                if image_response.status_code == 200:
+                    filename = os.path.join(save_dir, f"HR{image_counter + 1:03d}.jpg")
+                    with open(filename, "wb") as f:
+                        f.write(image_response.content)
+                    downloaded_urls.add(image_url)
+                    image_counter += 1
+                    print(f"Downloaded image {image_counter}: {filename}")
+                else:
+                    print(f"Failed to download image {image_url} (Status {image_response.status_code})")
+            except requests.RequestException as e:
+                print(f"Error downloading image {image_url}: {e}")
 
-            with open(filename, "wb") as f:
-                f.write(image_data)
-
-            image_counter += 1
-            if image_counter >= TOTAL_IMAGES:
+            if image_counter >= total_images:
                 break
 
-        page += 1  
-    else:
-        print("Error fetching images:", res.text)
-        break
+        page += 1
+        time.sleep(delay_between_requests)
 
-print(f"Downloaded {image_counter} unique images successfully!")
+    print(f"\nDownloaded {image_counter} unique images successfully!")
+    return image_counter
+
+
+if __name__ == "__main__":
+    # Example usage
+    download_pexels_images(
+        query="tree",
+        total_images=100,
+        per_page=20,
+        save_dir="data/highRes"
+    )
